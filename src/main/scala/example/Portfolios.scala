@@ -127,14 +127,38 @@ object Version2 {
 
     sealed trait ErrorOrResult[F[_], E, A] {
       def flatMap[B](fa: A => ErrorOrResult[F, E, B]): ErrorOrResult[F, E, B]
+      def map[B](f: A => B): ErrorOrResult[F, E, B]
     }
 
-    case class FutureErrorOrResult[A](a: A) extends  ErrorOrResult[Future, String, A]  {
-      override def flatMap[B](fa: (A) => ErrorOrResult[Future, String, B]): ErrorOrResult[Future, String, B] =
-        fa(a)
+    case class Error[F, E, A](e: E) extends ErrorOrResult[F, E, A] {
+      override def flatMap[B](fa: A => ErrorOrResult[F, E, B]): ErrorOrResult[F, E, B] = Error[F,E,B](e)
+      override def map[B](f: A => B): ErrorOrResult[F, E, B] = Error[F,E,B](e)
+    }
+
+   case class Success[A](a: A) extends ErrorOrResult[_, _, A] {
+      override def flatMap[B](fa: (A) => ErrorOrResult[_, _, B]): ErrorOrResult[_, _, B] = fa(a)
+      override def map[B](f: (A) => B): ErrorOrResult[_, _, B] = Success[B](f(a))
+    }
+
+    case class FutureErrorOrResult[E,A](v: Future[E \/ A]) extends ErrorOrResult[Future, E, A] {
+      override def flatMap[B](fa: (A) => ErrorOrResult[Future, E, B]): ErrorOrResult[Future, E, B] =
+        v.map(v => v match {
+          case -\/(e) => Error[Future,E,B](e)
+          case \/-(b) => fa(b)
+        })
+
+
+      def map[B](f: A => B): ErrorOrResult[Future, String, B] = {
+        val fae = v.map(v => v match {
+          case -\/(a) => -\/(a)
+          case \/-(b) => \/-(f(b))
+        })
+        FutureErrorOrResult(fae)
+      }
     }
 
     object FutureErrorOrResult {
+
       implicit class FutureOptErrorOrResult[A](fo: Future[Option[A]]) {
 
         def toErrorOrResult[A](error: String): ErrorOrResult[Future, String, A] = {
@@ -142,7 +166,7 @@ object Version2 {
             case Some(a) => \/.right(a)
             case None => \/.left(error)
           })
-          eitherT(v)
+          FutureErrorOrResult(v)
         }
 
         implicit class FutureErroring[A](f: Future[A]) {
@@ -153,6 +177,7 @@ object Version2 {
 
 
       }
+
     }
 
     import FutureErrorOrResult._
